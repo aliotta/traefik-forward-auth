@@ -1,4 +1,4 @@
-module github.com/thomseddon/traefik-forward-auth
+module github.com/aliotta/traefik-forward-auth
 
 go 1.22
 
@@ -6,6 +6,7 @@ toolchain go1.22.2
 
 require (
 	github.com/coreos/go-oidc v2.2.1+incompatible
+	github.com/golang-jwt/jwt/v4 v4.5.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.8.4
 	github.com/thomseddon/go-flags v1.4.1-0.20190507184247-a3629c504486

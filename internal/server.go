@@ -1,11 +1,13 @@
 package tfa
 
 import (
+	"github.com/golang-jwt/jwt/v4"
 	"net/http"
 	"net/url"
+	"strings"
 
+	"github.com/aliotta/traefik-forward-auth/internal/provider"
 	"github.com/sirupsen/logrus"
-	"github.com/thomseddon/traefik-forward-auth/internal/provider"
 	muxhttp "github.com/traefik/traefik/v2/pkg/muxer/http"
 )
 
@@ -76,6 +78,25 @@ func (s *Server) AllowHandler(rule string) http.HandlerFunc {
 	}
 }
 
+type AuthConn struct {
+	Id       string `json:"id"`
+	Name     string `json:"name"`
+	Strategy string `json:"strategy"`
+}
+
+type CustomClaims struct {
+	OrgAuthServiceId      string   `json:"org_id"`
+	Scope                 string   `json:"scope"`
+	Permissions           []string `json:"permissions"`
+	AuthConnection        AuthConn `json:"https://astronomer.io/jwt/auth_connection"`
+	Version               string   `json:"version"`
+	IsAstronomerGenerated bool     `json:"isAstronomerGenerated"`
+	RsaKeyId              string   `json:"kid"`
+	ApiTokenId            string   `json:"apiTokenId"`
+	IsInternal            bool     `json:"isInternal"`
+	jwt.RegisteredClaims
+}
+
 // AuthHandler Authenticates requests
 func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 	p, _ := config.GetConfiguredProvider(providerName)
@@ -84,38 +105,69 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 		// Logging setup
 		logger := s.logger(r, "Auth", rule, "Authenticating request")
 
-		// Get auth cookie
-		c, err := r.Cookie(config.CookieName)
-		if err != nil {
-			s.authRedirect(logger, w, r, p)
-			return
-		}
-
-		// Validate cookie
-		email, err := ValidateCookie(r, c)
-		if err != nil {
-			if err.Error() == "Cookie has expired" {
-				logger.Info("Cookie has expired")
-				s.authRedirect(logger, w, r, p)
-			} else {
-				logger.WithField("error", err).Warn("Invalid cookie")
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			authHeaderParts := strings.Fields(authHeader)
+			if len(authHeaderParts) != 2 || strings.ToLower(authHeaderParts[0]) != "bearer" || authHeaderParts[1] == "" {
+				logger.Warn("Invalid auth token")
 				http.Error(w, "Not authorized", 401)
+				return
 			}
-			return
-		}
 
-		// Validate user
-		valid := ValidateEmail(email, rule)
-		if !valid {
-			logger.WithField("email", email).Warn("Invalid email")
-			http.Error(w, "Not authorized", 401)
-			return
-		}
+			token := authHeaderParts[1]
+			// Parse the token to peek at the custom claims
+			jwtParser := jwt.NewParser()
+			parsedToken, _, err := jwtParser.ParseUnverified(token, &CustomClaims{})
+			if err != nil {
+				logger.Warn("Invalid auth token claims")
+				http.Error(w, "Not authorized", 401)
+				return
+			}
+			claims, ok := parsedToken.Claims.(*CustomClaims)
+			if !ok {
+				logger.Warn("Invalid auth token claims")
+				http.Error(w, "Not authorized", 401)
+				return
+			}
+			if claims.IsAstronomerGenerated == true && claims.Permissions != nil && len(claims.Permissions) > 0 {
+				logger.Debug("Allowing valid api token request")
+				w.WriteHeader(200)
+			}
+		} else {
+			// Get auth cookie
+			c, err := r.Cookie(config.CookieName)
+			if err != nil {
+				s.authRedirect(logger, w, r, p)
+				return
+			}
 
-		// Valid request
-		logger.Debug("Allowing valid request")
-		w.Header().Set("X-Forwarded-User", email)
-		w.WriteHeader(200)
+			// Validate cookie
+			email, err := ValidateCookie(r, c)
+			if err != nil {
+				if err.Error() == "Cookie has expired" {
+					logger.Info("Cookie has expired")
+					s.authRedirect(logger, w, r, p)
+				} else {
+					logger.WithField("error", err).Warn("Invalid cookie")
+					http.Error(w, "Not authorized", 401)
+				}
+				return
+			}
+
+			// Validate user
+			valid := ValidateEmail(email, rule)
+			if !valid {
+				logger.WithField("email", email).Warn("Invalid email")
+				http.Error(w, "Not authorized", 401)
+				return
+			}
+
+			// Valid request
+			logger.Debug("Allowing valid request")
+			w.Header().Set("Authorization", "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjRmeDJYNVFNa2o3Q25ycVNyX1ZuTyJ9.eyJodHRwczovL2FzdHJvbm9tZXIuaW8vand0L2F1dGhfY29ubmVjdGlvbiI6eyJpZCI6ImNvbl9veFNvb2tTQjhVcmV2UHAwIiwibmFtZSI6InNhbWxwLW1nbXQtdWkiLCJzdHJhdGVneSI6InNhbWxwIn0sImlzcyI6Imh0dHBzOi8vYXV0aC5hc3Ryb25vbWVyLmlvLyIsInN1YiI6InNhbWxwfHNhbWxwLW1nbXQtdWl8YWxleEBhc3Ryb25vbWVyLmlvIiwiYXVkIjpbImFzdHJvbm9tZXItZWUiLCJodHRwczovL2FzdHJvbm9tZXItcHJvZC51cy5hdXRoMC5jb20vdXNlcmluZm8iXSwiaWF0IjoxNzQ3NzQyNzAyLCJleHAiOjE3NDc3NDYzMDIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhenAiOiJYNFNJSGFXRkZreXgwdUE5UThlUVJaZEdrR2s3ZzRaZyIsInBlcm1pc3Npb25zIjpbXX0.v5mIqN_SsPHV99oLyPaeZCxLsuHIP8V9xsCdquRQjOWGpV63z9al-rd-itd-iTzOxJA1XXrqPgLJUM75_JimNcpqpnaf6Wcl6aAZiqvnGrqzMYR12GuzmJIjJOjN7u-4iyIIA-lSJRzZPZlISO8dbGzUFM0vAnM-roQ188o2bNSImH-HZWDlyo0srHrQabQgjt8ZqRSsoHHnha3a3za0aLG_0yOMPTVQdlLOybcosOCeu89sqpcA0-PY1JaMsspCev_70Ftkkat4L7VwZLtQSVKlIsVim2K2esj1tEp8E6kRUl_qE3ygrobzOllx9SS-p7zinX4mK4nnwvisM60CXQ")
+			w.Header().Set("X-Forwarded-User", "pasta")
+			w.WriteHeader(200)
+		}
 	}
 }
 
@@ -192,7 +244,9 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 			"redirect": redirect,
 			"user":     user.Email,
 		}).Info("Successfully generated auth cookie, redirecting user.")
-
+		w.Header().Set("Authorization", token)
+		r.Header.Add("Authorization", token)
+		r.Header.Set("Authorization", token)
 		// Redirect
 		http.Redirect(w, r, redirect, http.StatusTemporaryRedirect)
 	}
