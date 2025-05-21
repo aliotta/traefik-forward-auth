@@ -18,7 +18,7 @@ import (
 // Request Validation
 
 // ValidateCookie verifies that a cookie matches the expected format of:
-// Cookie = hash(secret, cookie domain, email, expires)|expires|email
+// Cookie = hash(secret, cookie domain, token, expires)|expires|token
 func ValidateCookie(r *http.Request, c *http.Cookie) (string, error) {
 	parts := strings.Split(c.Value, "|")
 
@@ -162,11 +162,10 @@ func useAuthDomain(r *http.Request) (bool, string) {
 // Cookie methods
 
 // MakeCookie creates an auth cookie
-func MakeCookie(r *http.Request, email string) *http.Cookie {
+func MakeCookie(r *http.Request, token string) *http.Cookie {
 	expires := cookieExpiry()
-	mac := cookieSignature(r, email, fmt.Sprintf("%d", expires.Unix()))
-	value := fmt.Sprintf("%s|%d|%s", mac, expires.Unix(), email)
-
+	mac := cookieSignature(r, token, fmt.Sprintf("%d", expires.Unix()))
+	value := fmt.Sprintf("%s|%d|%s", mac, expires.Unix(), token)
 	return &http.Cookie{
 		Name:     config.CookieName,
 		Value:    value,

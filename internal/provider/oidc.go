@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
 
 	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
@@ -25,6 +27,25 @@ func (o *OIDC) Name() string {
 	return "oidc"
 }
 
+type transportWithAudience struct {
+	Base     http.RoundTripper
+	Audience string
+}
+
+func (t *transportWithAudience) RoundTrip(req *http.Request) (*http.Response, error) {
+	// TODO Used for debugging but can be removed for final release. Also really the whole replacement of the http method can be removed.
+	fmt.Println("WWWWWWWW")
+	fmt.Println(req.URL.Path)
+	if req.URL.Path == "/oauth/token" {
+		//bodyBytes, _ := io.ReadAll(req.Body)
+		//fmt.Println("BBBBBBB")
+		//fmt.Println(string(bodyBytes))
+		//fmt.Println(req.Method)
+		//fmt.Println(req.URL)
+	}
+	return t.Base.RoundTrip(req)
+}
+
 // Setup performs validation and setup
 func (o *OIDC) Setup() error {
 	// Check parms
@@ -32,8 +53,16 @@ func (o *OIDC) Setup() error {
 		return errors.New("providers.oidc.issuer-url, providers.oidc.client-id, providers.oidc.client-secret must be set")
 	}
 
+	httpClient := &http.Client{
+		Transport: &transportWithAudience{
+			Base:     http.DefaultTransport,
+			Audience: "astronomer-ee",
+		},
+	}
+
 	var err error
-	o.ctx = context.Background()
+	ctx := context.Background()
+	o.ctx = context.WithValue(ctx, oauth2.HTTPClient, httpClient)
 
 	// Try to initiate provider
 	o.provider, err = oidc.NewProvider(o.ctx, o.IssuerURL)
@@ -46,9 +75,8 @@ func (o *OIDC) Setup() error {
 		ClientID:     o.ClientID,
 		ClientSecret: o.ClientSecret,
 		Endpoint:     o.provider.Endpoint(),
-
 		// "openid" is a required scope for OpenID Connect flows.
-		Scopes: []string{oidc.ScopeOpenID, "profile", "email"},
+		Scopes: []string{oidc.ScopeOpenID, "profile", "email", oidc.ScopeOfflineAccess},
 	}
 
 	// Create OIDC verifier

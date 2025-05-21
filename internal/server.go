@@ -1,7 +1,10 @@
 package tfa
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/golang-jwt/jwt/v4"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
@@ -142,7 +145,7 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 			}
 
 			// Validate cookie
-			email, err := ValidateCookie(r, c)
+			token, err := ValidateCookie(r, c)
 			if err != nil {
 				if err.Error() == "Cookie has expired" {
 					logger.Info("Cookie has expired")
@@ -154,17 +157,10 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 				return
 			}
 
-			// Validate user
-			valid := ValidateEmail(email, rule)
-			if !valid {
-				logger.WithField("email", email).Warn("Invalid email")
-				http.Error(w, "Not authorized", 401)
-				return
-			}
-
 			// Valid request
-			logger.Debug("Allowing valid request")
-			w.Header().Set("Authorization", "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IjRmeDJYNVFNa2o3Q25ycVNyX1ZuTyJ9.eyJodHRwczovL2FzdHJvbm9tZXIuaW8vand0L2F1dGhfY29ubmVjdGlvbiI6eyJpZCI6ImNvbl9veFNvb2tTQjhVcmV2UHAwIiwibmFtZSI6InNhbWxwLW1nbXQtdWkiLCJzdHJhdGVneSI6InNhbWxwIn0sImlzcyI6Imh0dHBzOi8vYXV0aC5hc3Ryb25vbWVyLmlvLyIsInN1YiI6InNhbWxwfHNhbWxwLW1nbXQtdWl8YWxleEBhc3Ryb25vbWVyLmlvIiwiYXVkIjpbImFzdHJvbm9tZXItZWUiLCJodHRwczovL2FzdHJvbm9tZXItcHJvZC51cy5hdXRoMC5jb20vdXNlcmluZm8iXSwiaWF0IjoxNzQ3NzQyNzAyLCJleHAiOjE3NDc3NDYzMDIsInNjb3BlIjoib3BlbmlkIHByb2ZpbGUgZW1haWwgb2ZmbGluZV9hY2Nlc3MiLCJhenAiOiJYNFNJSGFXRkZreXgwdUE5UThlUVJaZEdrR2s3ZzRaZyIsInBlcm1pc3Npb25zIjpbXX0.v5mIqN_SsPHV99oLyPaeZCxLsuHIP8V9xsCdquRQjOWGpV63z9al-rd-itd-iTzOxJA1XXrqPgLJUM75_JimNcpqpnaf6Wcl6aAZiqvnGrqzMYR12GuzmJIjJOjN7u-4iyIIA-lSJRzZPZlISO8dbGzUFM0vAnM-roQ188o2bNSImH-HZWDlyo0srHrQabQgjt8ZqRSsoHHnha3a3za0aLG_0yOMPTVQdlLOybcosOCeu89sqpcA0-PY1JaMsspCev_70Ftkkat4L7VwZLtQSVKlIsVim2K2esj1tEp8E6kRUl_qE3ygrobzOllx9SS-p7zinX4mK4nnwvisM60CXQ")
+			logger.Debug("Allowing valid request", r.Body)
+			logger.Debug("Allowing valid request header", r.Header)
+			w.Header().Set("Authorization", fmt.Sprintf("Bearer %s", token))
 			w.Header().Set("X-Forwarded-User", "pasta")
 			w.WriteHeader(200)
 		}
@@ -222,34 +218,79 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 		http.SetCookie(w, ClearCSRFCookie(r, c))
 
 		// Exchange code for token
-		token, err := p.ExchangeCode(redirectUri(r), r.URL.Query().Get("code"))
+		auth0Token, err := p.ExchangeCode(redirectUri(r), r.URL.Query().Get("code"))
 		if err != nil {
 			logger.WithField("error", err).Error("Code exchange failed with provider")
 			http.Error(w, "Service unavailable", 503)
 			return
 		}
-
-		// Get user
-		user, err := p.GetUser(token)
+		token, err := s.ExchangeAuth0TokenWithCoreSignedJwt("cmawzxvvs0000kfpjgibdhh96", "cmax00u1m000z01kl591lm26x", auth0Token)
 		if err != nil {
-			logger.WithField("error", err).Error("Error getting user")
+			logger.WithField("error", err).Error("Code exchange failed with core")
 			http.Error(w, "Service unavailable", 503)
 			return
 		}
-
+		fmt.Println("TOOOOOOOOOKEN")
+		fmt.Println(token)
 		// Generate cookie
-		http.SetCookie(w, MakeCookie(r, user.Email))
+		http.SetCookie(w, MakeCookie(r, token))
 		logger.WithFields(logrus.Fields{
 			"provider": providerName,
 			"redirect": redirect,
-			"user":     user.Email,
 		}).Info("Successfully generated auth cookie, redirecting user.")
-		w.Header().Set("Authorization", token)
-		r.Header.Add("Authorization", token)
-		r.Header.Set("Authorization", token)
+
 		// Redirect
 		http.Redirect(w, r, redirect, http.StatusTemporaryRedirect)
 	}
+}
+
+type CoreJwtResponse struct {
+	Jwt string `json:"jwt"`
+}
+
+func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(organizationId, deploymentId, token string) (string, error) {
+	fmt.Println("TTTTTTTT")
+	fmt.Println(token)
+	url := fmt.Sprintf("http://host.docker.internal:8888/private/v1alpha1/authz/organizations/%s/deployments/%s/airflow-jwt", organizationId, deploymentId)
+
+	// Create a new HTTP request
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		fmt.Println("Error creating request:", err)
+		log.Fatal("AAAAA1")
+	}
+
+	// Add headers to the request
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Add("X-Astro-Client-Identifier", "auth-proxy")
+
+	// Create an HTTP client and send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending request:", err)
+		log.Fatal("AAAAA2")
+
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error reading response body:", err)
+		log.Fatal("AAAAA3")
+	}
+
+	// Print the response status and body
+	fmt.Println("Response Status:", resp.Status)
+	fmt.Println("Response Body:", string(body))
+	var coreJwtReponse CoreJwtResponse
+	err = json.Unmarshal(body, &coreJwtReponse)
+	if err != nil {
+		fmt.Println("Error parsing core jwt response:", err)
+		log.Fatal("AAAAA5")
+	}
+	return coreJwtReponse.Jwt, nil
 }
 
 // LogoutHandler logs a user out

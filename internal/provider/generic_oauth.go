@@ -62,7 +62,6 @@ func (o *GenericOAuth) ExchangeCode(redirectURI, code string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	return token.AccessToken, nil
 }
 

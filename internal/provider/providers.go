@@ -48,19 +48,15 @@ func (p *OAuthProvider) ConfigCopy(redirectURI string) oauth2.Config {
 	return config
 }
 
-// OAuthGetLoginURL provides a base "GetLoginURL" for proiders using OAauth2
+// OAuthGetLoginURL provides a base "GetLoginURL" for providers using OAauth2
 func (p *OAuthProvider) OAuthGetLoginURL(redirectURI, state string) string {
 	config := p.ConfigCopy(redirectURI)
 
-	if p.Resource != "" {
-		return config.AuthCodeURL(state, oauth2.SetAuthURLParam("resource", p.Resource))
-	}
-
-	return config.AuthCodeURL(state)
+	return config.AuthCodeURL(state, oauth2.SetAuthURLParam("audience", "astronomer-ee"))
 }
 
-// OAuthExchangeCode provides a base "ExchangeCode" for proiders using OAauth2
+// OAuthExchangeCode provides a base "ExchangeCode" for providers using OAauth2
 func (p *OAuthProvider) OAuthExchangeCode(redirectURI, code string) (*oauth2.Token, error) {
 	config := p.ConfigCopy(redirectURI)
-	return config.Exchange(p.ctx, code)
+	return config.Exchange(p.ctx, code, oauth2.SetAuthURLParam("audience", "astronomer-ee"))
 }
