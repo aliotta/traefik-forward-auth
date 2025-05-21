@@ -1,0 +1,45 @@
+version: '3'
+
+services:
+  traefik:
+    image: "traefik:v2.2"
+    container_name: "traefik"
+    command:
+      #- "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=true"
+      - "--entryPoints.web.address=:80"
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  whoami:
+    image: "traefik/whoami"
+    container_name: "simple-service"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.localhost`)"
+      - "traefik.http.routers.whoami.entrypoints=web"
+      - "traefik.http.routers.whoami.middlewares=traefik-forward-auth"
+
+  traefik-forward-auth:
+    image: aliotta/traefik-forward-auth:2.54
+    environment:
+      - DEFAULT_PROVIDER=oidc
+      - PROVIDERS_OIDC_ISSUER_URL=https://astronomer-sandbox.us.auth0.com/
+      - PROVIDERS_OIDC_CLIENT_ID=SANDBOX_ENV_CLIENT_ID
+      - PROVIDERS_OIDC_CLIENT_SECRET=SANDBOX_ENV_SECRET
+      - PROVIDERS_OIDC_AUTH_URL=https://astronomer-sandbox.us.auth0.com/authorize
+      - PROVIDERS_OIDC_TOKEN_URL=https://astronomer-sandbox.us.auth0.com/oauth/token
+      - PROVIDERS_OIDC_USER_URL=https://astronomer-sandbox.us.auth0.com/userinfo
+      - SECRET=something-random
+      # INSECURE_COOKIE is required if not using a https entrypoint
+      - INSECURE_COOKIE=true
+      - LOG_LEVEL=debug
+    labels:
+      - "traefik.http.middlewares.traefik-forward-auth.forwardauth.address=http://traefik-forward-auth:4181"
+      - "traefik.http.middlewares.traefik-forward-auth.forwardauth.authResponseHeaders=X-Forwarded-User,Authorization"
+      - "traefik.http.services.traefik-forward-auth.loadbalancer.server.port=4181"
