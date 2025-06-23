@@ -3,8 +3,9 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/coreos/go-oidc"
 	"golang.org/x/oauth2"
@@ -27,36 +28,44 @@ func (o *OIDC) Name() string {
 	return "oidc"
 }
 
-type transportWithAudience struct {
-	Base     http.RoundTripper
-	Audience string
+type LoggingRoundTripper struct {
+	Proxied http.RoundTripper
+	Logger  *log.Logger
 }
 
-func (t *transportWithAudience) RoundTrip(req *http.Request) (*http.Response, error) {
-	// TODO Used for debugging but can be removed for final release. Also really the whole replacement of the http method can be removed.
-	fmt.Println("WWWWWWWW")
-	fmt.Println(req.URL.Path)
-	if req.URL.Path == "/oauth/token" {
-		//bodyBytes, _ := io.ReadAll(req.Body)
-		//fmt.Println("BBBBBBB")
-		//fmt.Println(string(bodyBytes))
-		//fmt.Println(req.Method)
-		//fmt.Println(req.URL)
+func (lrt *LoggingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+
+	// Log request details
+	lrt.Logger.Printf("Sending request: %s %s", req.Method, req.URL.String(), req.Header["Content-Type"])
+
+	// Execute the actual request
+	resp, err := lrt.Proxied.RoundTrip(req)
+
+	// Log response details or error
+	if err != nil {
+		lrt.Logger.Printf("Request failed: %s %s - Error: %v", req.Method, req.URL.String(), err)
+		return nil, err
 	}
-	return t.Base.RoundTrip(req)
+
+	lrt.Logger.Printf("Received response: %s %s - Status: %s - Duration: %v",
+		req.Method, req.URL.String(), resp.Status, time.Since(start))
+
+	return resp, nil
 }
 
 // Setup performs validation and setup
 func (o *OIDC) Setup() error {
-	// Check parms
+	// Check params
 	if o.IssuerURL == "" || o.ClientID == "" || o.ClientSecret == "" {
 		return errors.New("providers.oidc.issuer-url, providers.oidc.client-id, providers.oidc.client-secret must be set")
 	}
+	myLogger := log.Default()
 
 	httpClient := &http.Client{
-		Transport: &transportWithAudience{
-			Base:     http.DefaultTransport,
-			Audience: "astronomer-ee",
+		Transport: &LoggingRoundTripper{
+			Proxied: http.DefaultTransport, // Or any other http.RoundTripper
+			Logger:  myLogger,
 		},
 	}
 
@@ -100,9 +109,9 @@ func (o *OIDC) ExchangeCode(redirectURI, code string) (string, error) {
 	}
 
 	// Extract ID token
-	rawIDToken, ok := token.Extra("id_token").(string)
+	rawIDToken, ok := token.Extra("access_token").(string)
 	if !ok {
-		return "", errors.New("Missing id_token")
+		return "", errors.New("Missing access_token")
 	}
 
 	return rawIDToken, nil

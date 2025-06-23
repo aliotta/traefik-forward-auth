@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  web:
+    image: "traefik/whoami"
+    # No need to expose ports to the host for 'web' directly,
+    # as Envoy will be the entry point.
+    # If you wanted to test 'web' directly, you could add:
+    # ports:
+    #   - "8081:80" # Host port 8081 maps to container port 80
+  envoy:
+    image: envoyproxy/envoy:v1.28-latest # Use a recent version
+    ports:
+      - "8080:8080" # External port for requests
+      - "9901:9901" # Admin interface
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro
+    depends_on:
+      - web
+      - traefik-forward-auth
+
+  traefik-forward-auth:
+    image: aliotta/traefik-forward-auth:2.76
+    environment:
+      - DEFAULT_PROVIDER=oidc
+      - PROVIDERS_OIDC_ISSUER_URL=
+      - PROVIDERS_OIDC_CLIENT_ID=
+      - PROVIDERS_OIDC_CLIENT_SECRET=
+      - PROVIDERS_OIDC_AUTH_URL=
+      - PROVIDERS_OIDC_TOKEN_URL=
+      - PROVIDERS_OIDC_USER_URL=
+      - SECRET=something-random
+      # INSECURE_COOKIE is required if not using a https entrypoint
+      - INSECURE_COOKIE=true
+      - LOG_LEVEL=debug
+    # ports: # No need to expose externally, Envoy talks to it internally
+    #  - "4181:4181"

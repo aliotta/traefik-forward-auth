@@ -224,14 +224,14 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 			http.Error(w, "Service unavailable", 503)
 			return
 		}
-		token, err := s.ExchangeAuth0TokenWithCoreSignedJwt("cmawzxvvs0000kfpjgibdhh96", "cmax00u1m000z01kl591lm26x", auth0Token)
+
+		token, err := s.ExchangeAuth0TokenWithCoreSignedJwt("cmbi2ajf80000kfq8exge0k7u", "cmbi2ehuz000l01mlhqikwsyj", auth0Token)
 		if err != nil {
 			logger.WithField("error", err).Error("Code exchange failed with core")
 			http.Error(w, "Service unavailable", 503)
 			return
 		}
-		fmt.Println("TOOOOOOOOOKEN")
-		fmt.Println(token)
+
 		// Generate cookie
 		http.SetCookie(w, MakeCookie(r, token))
 		logger.WithFields(logrus.Fields{
@@ -249,15 +249,12 @@ type CoreJwtResponse struct {
 }
 
 func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(organizationId, deploymentId, token string) (string, error) {
-	fmt.Println("TTTTTTTT")
-	fmt.Println(token)
 	url := fmt.Sprintf("http://host.docker.internal:8888/private/v1alpha1/authz/organizations/%s/deployments/%s/airflow-jwt", organizationId, deploymentId)
 
 	// Create a new HTTP request
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		fmt.Println("Error creating request:", err)
-		log.Fatal("AAAAA1")
 	}
 
 	// Add headers to the request
@@ -269,7 +266,6 @@ func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(organizationId, deploymentI
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending request:", err)
-		log.Fatal("AAAAA2")
 
 	}
 	defer resp.Body.Close()
@@ -278,7 +274,6 @@ func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(organizationId, deploymentI
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("Error reading response body:", err)
-		log.Fatal("AAAAA3")
 	}
 
 	// Print the response status and body
@@ -288,7 +283,6 @@ func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(organizationId, deploymentI
 	err = json.Unmarshal(body, &coreJwtReponse)
 	if err != nil {
 		fmt.Println("Error parsing core jwt response:", err)
-		log.Fatal("AAAAA5")
 	}
 	return coreJwtReponse.Jwt, nil
 }

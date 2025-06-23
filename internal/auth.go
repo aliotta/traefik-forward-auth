@@ -125,7 +125,7 @@ func ValidateDomains(email string, domains CommaSeparatedList) bool {
 
 // Get the redirect base
 func redirectBase(r *http.Request) string {
-	return fmt.Sprintf("%s://%s", r.Header.Get("X-Forwarded-Proto"), r.Host)
+	return fmt.Sprintf("%s://localhost:8080", r.Header.Get("X-Forwarded-Proto"))
 }
 
 // Return url
@@ -285,12 +285,7 @@ func cookieDomain(r *http.Request) string {
 
 // Cookie domain
 func csrfCookieDomain(r *http.Request) string {
-	var host string
-	if use, domain := useAuthDomain(r); use {
-		host = domain
-	} else {
-		host = r.Host
-	}
+	var host string = "localhost:8080"
 
 	// Remove port
 	p := strings.Split(host, ":")
