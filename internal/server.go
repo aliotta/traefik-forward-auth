@@ -1,10 +1,15 @@
 package tfa
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/golang-jwt/jwt/v4"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -17,13 +22,15 @@ import (
 
 // Server contains muxer and handler methods
 type Server struct {
-	muxer *muxhttp.Muxer
+	muxer         *muxhttp.Muxer
+	EncryptionKey string
 }
 
 // NewServer creates a new server object and builds muxer
 func NewServer() *Server {
 	s := &Server{}
 	s.buildRoutes()
+	s.EncryptionKey = "12345678901234567890123456789012"
 	return s
 }
 
@@ -146,7 +153,7 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 			}
 
 			// Validate cookie
-			token, err := ValidateCookie(r, c)
+			base64EncodedEncryptedToken, err := ValidateCookie(r, c)
 			if err != nil {
 				if err.Error() == "Cookie has expired" {
 					logger.Info("Cookie has expired")
@@ -158,10 +165,51 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 				return
 			}
 
+			encryptedTokenBytes, err := base64.StdEncoding.DecodeString(base64EncodedEncryptedToken)
+			if err != nil {
+				fmt.Println("Error decoding cookie:", err)
+				http.Error(w, "Error:", http.StatusInternalServerError)
+				return
+			}
+
+			block, err := aes.NewCipher([]byte(s.EncryptionKey))
+			if err != nil {
+				logger.Warn("Failed to create AES cipher:", err)
+				http.Error(w, "Error:", http.StatusInternalServerError)
+				return
+			}
+
+			gcm, err := cipher.NewGCM(block)
+			if err != nil {
+				logger.Warn("Failed to create gcm:", err)
+				http.Error(w, "Error:", http.StatusInternalServerError)
+				return
+			}
+
+			nonceSize := gcm.NonceSize()
+			if len(encryptedTokenBytes) < nonceSize {
+				panic("encrypted data is too short to contain nonce")
+			}
+
+			nonce := encryptedTokenBytes[:nonceSize]
+			ciphertext := encryptedTokenBytes[nonceSize:]
+
+			fmt.Println("HUHHHH")
+			fmt.Println(string(nonce))
+			fmt.Println(string(encryptedTokenBytes))
+
+			// Decryption
+			decryptedToken, err := gcm.Open(nil, nonce, ciphertext, nil)
+			if err != nil {
+				logger.Warn("Failed to decrypt token:", err)
+				http.Error(w, "Error:", http.StatusInternalServerError)
+				return
+			}
+
 			// Valid request
 			logger.Debug("Allowing valid request", r.Body)
 			logger.Debug("Allowing valid request header", r.Header)
-			w.Header().Set("Authorization", fmt.Sprintf("Bearer %s", token))
+			w.Header().Set("Authorization", fmt.Sprintf("Bearer %s", decryptedToken))
 			w.Header().Set("X-Forwarded-User", "pasta")
 			w.WriteHeader(200)
 		}
@@ -233,8 +281,37 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 			return
 		}
 
+		block, err := aes.NewCipher([]byte(s.EncryptionKey))
+		if err != nil {
+			logger.Warn("Failed to create AES cipher:", err)
+			http.Error(w, "Error:", http.StatusInternalServerError)
+			return
+		}
+
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			logger.Warn("Failed to create gcm:", err)
+			http.Error(w, "Error:", http.StatusInternalServerError)
+			return
+		}
+
+		nonce := make([]byte, gcm.NonceSize())
+		if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+			logger.Warn("Failed to create nonce:", err)
+			http.Error(w, "Error:", http.StatusInternalServerError)
+			return
+		}
+
+		encryptedToken := gcm.Seal(nonce, nonce, []byte(token), nil) // nonce is prepended to ciphertext
+
+		fmt.Println("HMMMMM")
+		fmt.Println(string(nonce))
+		fmt.Println(string(encryptedToken))
+
+		base64EncodedToken := base64.StdEncoding.EncodeToString(encryptedToken)
+
 		// Generate cookie
-		http.SetCookie(w, MakeCookie(r, token))
+		http.SetCookie(w, MakeCookie(r, base64EncodedToken))
 		logger.WithFields(logrus.Fields{
 			"provider": providerName,
 			"redirect": redirect,
