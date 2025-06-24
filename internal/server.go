@@ -2,6 +2,7 @@ package tfa
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/golang-jwt/jwt/v4"
 	"io/ioutil"
@@ -225,7 +226,7 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 			return
 		}
 
-		token, err := s.ExchangeAuth0TokenWithCoreSignedJwt("cmbi2ajf80000kfq8exge0k7u", "cmbi2ehuz000l01mlhqikwsyj", auth0Token)
+		token, err := s.ExchangeAuth0TokenWithCoreSignedJwt("cmcaxxcba000j01n2h8ds6v8p", auth0Token)
 		if err != nil {
 			logger.WithField("error", err).Error("Code exchange failed with core")
 			http.Error(w, "Service unavailable", 503)
@@ -248,13 +249,14 @@ type CoreJwtResponse struct {
 	Jwt string `json:"jwt"`
 }
 
-func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(organizationId, deploymentId, token string) (string, error) {
-	url := fmt.Sprintf("http://host.docker.internal:8888/private/v1alpha1/authz/organizations/%s/deployments/%s/airflow-jwt", organizationId, deploymentId)
+func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(deploymentId, token string) (string, error) {
+	url := fmt.Sprintf("http://host.docker.internal:8888/private/v1alpha1/authz/deployments/%s/airflow-jwt", deploymentId)
 
 	// Create a new HTTP request
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		fmt.Println("Error creating request:", err)
+		return "", err
 	}
 
 	// Add headers to the request
@@ -266,7 +268,11 @@ func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(organizationId, deploymentI
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending request:", err)
-
+		return "", err
+	}
+	if resp.StatusCode != 200 {
+		fmt.Printf("Received non-200 status code: %d\n", resp.StatusCode)
+		return "", errors.New(fmt.Sprintf("Received non-200 status code: %d", resp.StatusCode))
 	}
 	defer resp.Body.Close()
 
@@ -274,16 +280,16 @@ func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(organizationId, deploymentI
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("Error reading response body:", err)
+		return "", err
 	}
 
-	// Print the response status and body
-	fmt.Println("Response Status:", resp.Status)
-	fmt.Println("Response Body:", string(body))
 	var coreJwtReponse CoreJwtResponse
 	err = json.Unmarshal(body, &coreJwtReponse)
 	if err != nil {
 		fmt.Println("Error parsing core jwt response:", err)
+		return "", err
 	}
+	fmt.Println("Response Body:", coreJwtReponse)
 	return coreJwtReponse.Jwt, nil
 }
 
