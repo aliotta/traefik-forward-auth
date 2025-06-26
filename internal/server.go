@@ -30,7 +30,7 @@ type Server struct {
 func NewServer() *Server {
 	s := &Server{}
 	s.buildRoutes()
-	s.EncryptionKey = "12345678901234567890123456789012"
+	s.EncryptionKey = config.CookieValueSecret
 	return s
 }
 
@@ -194,10 +194,6 @@ func (s *Server) AuthHandler(providerName, rule string) http.HandlerFunc {
 			nonce := encryptedTokenBytes[:nonceSize]
 			ciphertext := encryptedTokenBytes[nonceSize:]
 
-			fmt.Println("HUHHHH")
-			fmt.Println(string(nonce))
-			fmt.Println(string(encryptedTokenBytes))
-
 			// Decryption
 			decryptedToken, err := gcm.Open(nil, nonce, ciphertext, nil)
 			if err != nil {
@@ -274,7 +270,7 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 			return
 		}
 
-		token, err := s.ExchangeAuth0TokenWithCoreSignedJwt("cmcaxxcba000j01n2h8ds6v8p", auth0Token)
+		token, err := s.ExchangeAuth0TokenWithCoreSignedJwt("cmcdjg49t000j01s8s25pdimx", auth0Token)
 		if err != nil {
 			logger.WithField("error", err).Error("Code exchange failed with core")
 			http.Error(w, "Service unavailable", 503)
@@ -303,10 +299,6 @@ func (s *Server) AuthCallbackHandler() http.HandlerFunc {
 		}
 
 		encryptedToken := gcm.Seal(nonce, nonce, []byte(token), nil) // nonce is prepended to ciphertext
-
-		fmt.Println("HMMMMM")
-		fmt.Println(string(nonce))
-		fmt.Println(string(encryptedToken))
 
 		base64EncodedToken := base64.StdEncoding.EncodeToString(encryptedToken)
 
@@ -366,7 +358,6 @@ func (s *Server) ExchangeAuth0TokenWithCoreSignedJwt(deploymentId, token string)
 		fmt.Println("Error parsing core jwt response:", err)
 		return "", err
 	}
-	fmt.Println("Response Body:", coreJwtReponse)
 	return coreJwtReponse.Jwt, nil
 }
 

@@ -40,9 +40,9 @@ type Config struct {
 	SecretString           string               `long:"secret" env:"SECRET" description:"Secret used for signing (required)" json:"-"`
 	Whitelist              CommaSeparatedList   `long:"whitelist" env:"WHITELIST" env-delim:"," description:"Only allow given email addresses, can be set multiple times"`
 	Port                   int                  `long:"port" env:"PORT" default:"4181" description:"Port to listen on"`
-
-	Providers provider.Providers `group:"providers" namespace:"providers" env-namespace:"PROVIDERS"`
-	Rules     map[string]*Rule   `long:"rule.<name>.<param>" description:"Rule definitions, param can be: \"action\", \"rule\" or \"provider\""`
+	CookieValueSecret      string               `long:"cookie-value-secret" env:"COOKIE_VALUE_SECRET" description:"Secret used to encrypt cookie value"`
+	Providers              provider.Providers   `group:"providers" namespace:"providers" env-namespace:"PROVIDERS"`
+	Rules                  map[string]*Rule     `long:"rule.<name>.<param>" description:"Rule definitions, param can be: \"action\", \"rule\" or \"provider\""`
 
 	// Filled during transformations
 	Secret   []byte `json:"-"`
